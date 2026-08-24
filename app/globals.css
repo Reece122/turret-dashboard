@@ -402,6 +402,25 @@ body {
   color: var(--accent);
 }
 
+.class-select {
+  display: block;
+  width: 100%;
+  margin-top: 7px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #0a0e15;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  font-family: ui-monospace, monospace;
+  outline: none;
+  cursor: pointer;
+}
+
+.class-select:focus {
+  border-color: var(--accent);
+}
+
 .slider {
   width: 100%;
   -webkit-appearance: none;

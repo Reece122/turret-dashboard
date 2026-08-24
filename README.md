@@ -1,36 +1,159 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+<div align="center">
 
-## Getting Started
+# AutoTurret
 
-First, run the development server:
+**A camera-driven, object-tracking pan/tilt turret** — Jetson-hosted vision, a
+closed-loop control law tuned in simulation before it ever touched hardware,
+and a live web dashboard to run and tune it from any device on the network.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white)](https://nextjs.org)
+[![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)](https://react.dev)
+[![Python](https://img.shields.io/badge/Python-Flask-3776AB?logo=python&logoColor=white)](https://flask.palletsprojects.com)
+[![Ultralytics](https://img.shields.io/badge/Vision-YOLO11-8A2BE2)](https://docs.ultralytics.com)
+[![Jetson Orin Nano](https://img.shields.io/badge/Compute-Jetson%20Orin%20Nano-76B900?logo=nvidia&logoColor=white)](https://developer.nvidia.com/embedded/jetson-orin)
+
+</div>
+
+<br>
+
+<!--
+  DEMO VIDEO
+  Drop the clip at media/demo.mp4 and a poster frame at media/dashboard.png —
+  GitHub renders <video> tags for files committed at a relative repo path.
+  Keep the file small (a compressed minute or two, ideally well under 25MB)
+  so the repo stays light to clone. For anything longer, swap this block for
+  a YouTube thumbnail link instead: [![Demo](media/dashboard.png)](youtube-url)
+-->
+<p align="center">
+  <video src="media/demo.mp4" controls width="100%" poster="media/dashboard.png">
+    Demo video — see <code>media/demo.mp4</code>.
+  </video>
+</p>
+
+---
+
+## What it is
+
+Two processes talking over HTTP: a **Python/Flask vision server** that owns
+the camera, runs YOLO11 detection, and drives two servos over I2C; and a
+**Next.js dashboard** that streams the annotated feed, exposes every control
+gain as a live slider, and can start/stop/restart the vision server remotely.
+Point it at a moving target and it tracks and aims a laser at it in real time.
+
+The interesting part isn't the demo — it's getting from "twitches on a
+stationary target, lags behind a fast one" to a single, stable control law
+that handles both. That's documented in full in **[DEVLOG.md](DEVLOG.md)**.
+
+## Highlights
+
+- **Velocity feedforward control** — commands the target's own angular rate
+  directly instead of waiting for position error to build up, collapsing what
+  used to be a fragile two-mode (acquire/track) state machine into one gain
+  that's stable at every speed. [Details →](DEVLOG.md#2-the-tracking-control-saga-the-big-one)
+- **World-space tracking** — target velocity is estimated in world space
+  (image position + camera angle), not image space, so panning to follow the
+  target is never mistaken for the target moving.
+- **Custom-trained YOLO11 detector** — a from-scratch drone detector
+  (mAP@50 0.976) trained and fine-tuned on the Jetson itself, alongside a
+  from-scratch OpenCV blob tracker as a no-neural-net fallback mode.
+- **Simulated before it was tuned on hardware** — every control-law and gain
+  change was validated in a closed-loop 2D simulator first; hardware time was
+  spent confirming, not guessing. See `tools/tune.py`.
+- **Face-safety clamp** — with an always-on laser payload, aim is hard-clamped
+  to at or below the shoulder line whenever the target class is a person.
+- **Fully live-tunable** — every PID/Kalman/feedforward gain, camera setting,
+  and servo limit is a dashboard slider with immediate effect — no redeploy
+  to tune.
+
+## How it works
+
+| Piece | Detail |
+|---|---|
+| Compute | Jetson Orin Nano 8GB, JetPack 6.2.3 |
+| Vision | YOLO11 (pose + custom drone detector) and an OpenCV blob tracker |
+| Control | PID + velocity feedforward on a Kalman-filtered world-space estimate |
+| Actuation | 2x servos via PCA9685 over I2C |
+| Payload | Always-on laser designator |
+| Backend | `python_server.py` — Flask + MJPEG stream + vision/control thread, port 8000 |
+| Frontend | Next.js 16 / React 19 dashboard, `app/page.tsx`, port 3000 |
+| Test rig | `tools/drone_target.html` — animated on-screen target for indoor tuning |
+
+```
+┌────────────────────┐        spawns/kills, proxies stream        ┌───────────────────────┐
+│  Next.js dashboard  │ ───────────────────────────────────────▶  │  Flask vision server   │
+│  (port 3000)        │ ◀───────────────────────────────────────  │  (port 8000)           │
+│  live config sliders│        MJPEG feed + telemetry JSON         │  camera → YOLO11/blob  │
+└────────────────────┘                                            │  → Kalman → PID+FF     │
+                                                                    │  → PCA9685 → servos    │
+                                                                    └───────────────────────┘
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Screenshots
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+<!-- Swap in real captures at these paths — table renders once the files exist. -->
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Dashboard | Tracking overlay |
+|---|---|
+| ![Dashboard](media/dashboard.png) | ![Tracking](media/tracking.png) |
 
-## Learn More
+## Hardware & CAD
 
-To learn more about Next.js, take a look at the following resources:
+Full wiring, power domains, and bring-up steps are in **[HARDWARE.md](HARDWARE.md)**.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+CAD source lives in [`/cad`](cad):
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| File | Format | Notes |
+|---|---|---|
+| `turret_mount.f3d` *(or your native format)* | Native project file | Full parametric design |
+| `turret_mount.stl` | STL | Print-ready mesh |
 
-## Deploy on Vercel
+## Tech stack
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+**Frontend:** Next.js 16, React 19, TypeScript
+**Backend:** Python, Flask, OpenCV, NumPy
+**Vision:** Ultralytics YOLO11 (pose + custom-trained detection), custom Kalman filter
+**Hardware:** NVIDIA Jetson Orin Nano, PCA9685 servo driver, 2x hobby servos, USB camera, laser module
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Getting started
+
+```bash
+# one-time Jetson setup (Node, Python deps, I2C, systemd service)
+sudo bash jetson_setup.sh
+
+# dev — dashboard only (vision server is started from the UI's Start button)
+npm run dev
+
+# or reachable from other devices on the LAN
+npm run dev:lan
+```
+
+The dashboard's **Start** button spawns `python_server.py` (see
+`app/api/server/route.ts`); it isn't run manually. With no PCA9685 attached,
+servo output degrades to a silent no-op so the vision loop still runs
+standalone (e.g. on a laptop against `tools/drone_target.html`).
+
+## Project journal
+
+**[DEVLOG.md](DEVLOG.md)** is the full build log — nine failed approaches to
+the tracking-control bug before the actual fix, the 9→15 FPS camera-driver
+investigation, the drone-detector training runs, and every hardware bump
+along the way. Written to capture *why*, not just *what*, so worth a read if
+you want the engineering story rather than just the code.
+
+## Roadmap
+
+Next up, in priority order (latency is the documented bottleneck on
+everything below it — see [DEVLOG §12](DEVLOG.md#12-roadmap--planned-improvements)):
+
+1. **Camera fps + quality** — current ~15fps ceiling is USB/MJPG-decode
+   throughput; a better sensor fixes both fps and image quality at once.
+2. **Better, smoother servos** — hobby-grade MG996R are the current
+   mechanical noise floor.
+3. **Two-camera distance triangulation** — stereo rig flanking the laser for
+   a real distance estimate, not just parallax correction.
+4. **Vision model quality** — more/varied training data for the drone
+   detector.
+
+## License
+
+No license file yet — all rights reserved by default until one is added.
