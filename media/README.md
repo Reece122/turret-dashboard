@@ -1,15 +1,11 @@
 # Media
 
-Drop portfolio assets here — the root `README.md` already references these
-paths, so it lights up automatically once the files exist:
+Demo footage embedded in the root `README.md`:
 
-| File | Used for |
+| File | Shows |
 |---|---|
-| `demo.mp4` | Hero video embed at the top of the README |
-| `dashboard.png` | Video poster frame + dashboard screenshot |
-| `tracking.png` | Tracking-overlay screenshot |
-
-Keep `demo.mp4` compressed (ideally well under 25MB) — GitHub renders it
-inline from a relative path, but a large video bloats every future clone of
-the repo. If the full-length version is long, put a short highlight clip here
-and link the full video on YouTube instead.
+| `drone-3rd-person.mov` | Tracking a drone target, 3rd-person view (also the hero clip) |
+| `drone-dashboard-pov.mov` | Same drone run, from the live dashboard's feed |
+| `ball-line.mov` | Ball tracking, straight-line motion |
+| `ball-figure8.mov` | Ball tracking, figure-8 motion |
+| `ball-pinpoint.mov` | Ball tracking, pinpoint mode (target pops up/vanishes — forces a genuine re-acquire) |

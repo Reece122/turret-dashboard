@@ -16,21 +16,27 @@ and a live web dashboard to run and tune it from any device on the network.
 
 <br>
 
-<!--
-  DEMO VIDEO
-  Drop the clip at media/demo.mp4 and a poster frame at media/dashboard.png —
-  GitHub renders <video> tags for files committed at a relative repo path.
-  Keep the file small (a compressed minute or two, ideally well under 25MB)
-  so the repo stays light to clone. For anything longer, swap this block for
-  a YouTube thumbnail link instead: [![Demo](media/dashboard.png)](youtube-url)
--->
 <p align="center">
-  <video src="media/demo.mp4" controls width="100%" poster="media/dashboard.png">
-    Demo video — see <code>media/demo.mp4</code>.
+  <video src="media/drone-3rd-person.mov" controls width="100%">
+    Demo video — see <code>media/drone-3rd-person.mov</code>.
   </video>
 </p>
 
 ---
+
+## Demo
+
+**Drone tracking**
+
+| 3rd person | Dashboard POV |
+|---|---|
+| <video src="media/drone-3rd-person.mov" controls width="100%"></video> | <video src="media/drone-dashboard-pov.mov" controls width="100%"></video> |
+
+**Ball tracking** — same control law, three motion patterns
+
+| Straight-line | Figure-8 | Pinpoint (acquire/reacquire) |
+|---|---|---|
+| <video src="media/ball-line.mov" controls width="100%"></video> | <video src="media/ball-figure8.mov" controls width="100%"></video> | <video src="media/ball-pinpoint.mov" controls width="100%"></video> |
 
 ## What it is
 
@@ -88,14 +94,6 @@ that handles both. That's documented in full in **[DEVLOG.md](DEVLOG.md)**.
                                                                     └───────────────────────┘
 ```
 
-## Screenshots
-
-<!-- Swap in real captures at these paths — table renders once the files exist. -->
-
-| Dashboard | Tracking overlay |
-|---|---|
-| ![Dashboard](media/dashboard.png) | ![Tracking](media/tracking.png) |
-
 ## Hardware & CAD
 
 Full wiring, power domains, and bring-up steps are in **[HARDWARE.md](HARDWARE.md)**.
@@ -104,8 +102,7 @@ CAD source lives in [`/cad`](cad):
 
 | File | Format | Notes |
 |---|---|---|
-| `turret_mount.f3d` *(or your native format)* | Native project file | Full parametric design |
-| `turret_mount.stl` | STL | Print-ready mesh |
+| [`FinalAssembly.SLDASM`](cad/FinalAssembly.SLDASM) | SolidWorks assembly | Full turret assembly, parametric |
 
 ## Tech stack
 
