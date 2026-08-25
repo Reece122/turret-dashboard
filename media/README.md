@@ -9,3 +9,4 @@ Demo footage embedded in the root `README.md`:
 | `ball-line.mov` | Ball tracking, straight-line motion |
 | `ball-figure8.mov` | Ball tracking, figure-8 motion |
 | `ball-pinpoint.mov` | Ball tracking, pinpoint mode (target pops up/vanishes — forces a genuine re-acquire) |
+| `cad-render.png` | CAD assembly render, used in the Hardware & CAD section |

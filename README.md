@@ -98,6 +98,10 @@ that handles both. That's documented in full in **[DEVLOG.md](DEVLOG.md)**.
 
 Full wiring, power domains, and bring-up steps are in **[HARDWARE.md](HARDWARE.md)**.
 
+<p align="center">
+  <img src="media/cad-render.png" alt="AutoTurret CAD assembly — pan/tilt mount with servo gearing" width="500">
+</p>
+
 CAD source lives in [`/cad`](cad):
 
 | File | Format | Notes |
