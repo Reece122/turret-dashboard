@@ -368,6 +368,28 @@ px_per_deg 10.7
 Running at ~14–15 fps, no crashes. Q ceiling raised to 60000. The dashboard
 exposes a **Feedforward** slider (set to 0 to A/B against the old behavior).
 
+### Diagnostics: latency + slew rate
+
+Added to get real numbers instead of estimates:
+
+- **`loop_latency_ms`** in `/telemetry` — smoothed capture-read-to-servo-write
+  processing time per frame. Deliberately *not* claimed as total glass-to-servo
+  latency: camera driver/USB buffering happens below this process and isn't
+  visible to it.
+- **`POST /bench/slew`** (`{"axis": "pan"|"tilt", "duration": 2.5}`), polled
+  via `GET /bench/slew` — steps the axis to its far travel limit and measures
+  the camera's *actual* angular velocity from frame-to-frame background shift
+  (`cv2.phaseCorrelate`, converted through `px_per_deg`), not just the
+  commanded angle. There's no position encoder on this rig, so watching the
+  scene move is the only way to see real servo speed. Needs the camera aimed
+  at any normal textured, static scene — a blank wall gives nothing to
+  correlate against. Runs inside the vision thread (gated behind
+  `slew_bench["active"]`) so it can't race the camera or fight tracking's own
+  servo writes; any internal error aborts just the benchmark.
+- Not yet run against real hardware — thresholds (benchmark duration, the
+  10%-of-peak cutoff for the "in motion" average) are first-pass defaults and
+  may need adjusting once real samples come back.
+
 ### `ff_gain` = 1.0 is an instability boundary, not just "exact"
 
 `ff_gain 1.0` was originally described as exact cancellation of the target's

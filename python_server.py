@@ -196,10 +196,27 @@ telemetry = {
     "lead_frac": 0.0,   # fraction of full lead currently applied (0=off, 1=full)
     "mode": "holding",  # "moving" | "holding" - display only; one control law
     "servo": "off",   # "on" (driving hardware) | "off" (disabled) | "sim" (no board)
+    "loop_latency_ms": 0.0,  # smoothed capture-read -> servo-write processing
+                              # time. NOT total glass-to-servo latency - it
+                              # excludes camera driver/USB buffering, which
+                              # this process can't see.
 }
 
 # One-shot commands from the dashboard the vision loop picks up each frame.
 control = {"recenter": False}
+
+# Diagnostic slew-rate benchmark: steps one axis to its far travel limit and
+# measures the camera's ACTUAL angular velocity from frame-to-frame
+# background shift (phase correlation against px_per_deg), not just the
+# commanded angle. There's no position encoder on this rig, so watching the
+# scene move IS the only way to see real (not commanded) servo speed - it
+# needs the camera looking at any normal textured, static scene (a shelf, a
+# cluttered desk; a blank wall won't have anything to correlate against).
+# Runs inside the vision thread itself (see _slew_bench_step) so it can't
+# race the camera or fight the tracking loop's own servo writes. Only active
+# when explicitly started via POST /bench/slew; any internal error aborts it
+# without touching tracking.
+slew_bench = {"active": False}
 
 # The single vision thread publishes its latest annotated JPEG here; every
 # /video viewer just streams this shared buffer. One camera, one capture — so
@@ -587,6 +604,59 @@ def vision_loop():
             time.sleep(0.5)
 
 
+def _slew_bench_step(frame, now, dt, servos, config, bench, pan_angle, tilt_angle):
+    """One iteration of the slew-rate benchmark. Returns (pan_angle, tilt_angle,
+    still_running) - the caller must adopt these back into its own loop vars so
+    tracking doesn't resume from a stale pre-benchmark position."""
+    axis = bench["axis"]
+    channel = config["pan_channel"] if axis == "pan" else config["tilt_channel"]
+    lo, hi = ((config["pan_min"], config["pan_max"]) if axis == "pan"
+              else (config["tilt_min"], config["tilt_max"]))
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype("float32")
+
+    if bench.get("prev_gray") is None:
+        # First frame: command the step to the far limit and start timing.
+        # (step away from whichever limit we're currently closer to)
+        current = pan_angle if axis == "pan" else tilt_angle
+        target = hi if current <= (lo + hi) / 2 else lo
+        bench["target_angle"] = target
+        bench["t0"] = now
+        bench["prev_gray"] = gray
+        if config["servo_enabled"]:
+            servos.write(channel, target)
+        if axis == "pan":
+            pan_angle = target
+        else:
+            tilt_angle = target
+        return pan_angle, tilt_angle, True
+
+    shift, _ = cv2.phaseCorrelate(bench["prev_gray"], gray)
+    bench["prev_gray"] = gray
+    dx, dy = shift
+    px_shift = dx if axis == "pan" else dy
+    if dt > 0:
+        deg_per_s = abs(px_shift) / max(config["px_per_deg"], 0.001) / dt
+        bench["samples"].append({"t": round(now - bench["t0"], 3), "deg_per_s": round(deg_per_s, 1)})
+
+    elapsed = now - bench["t0"]
+    if elapsed >= bench["duration"]:
+        samples = bench["samples"]
+        peak = max((s["deg_per_s"] for s in samples), default=0.0)
+        # Average over samples actually in motion (>10% of peak) - excludes
+        # the still-sitting-at-the-end tail from dragging the average down.
+        moving = [s["deg_per_s"] for s in samples if s["deg_per_s"] > peak * 0.1]
+        avg = sum(moving) / len(moving) if moving else 0.0
+        bench["result"] = {
+            "axis": axis, "peak_deg_per_s": round(peak, 1),
+            "avg_deg_per_s": round(avg, 1), "duration_s": round(elapsed, 2),
+            "sample_count": len(samples),
+        }
+        bench["active"] = False
+        return pan_angle, tilt_angle, False
+
+    return pan_angle, tilt_angle, True
+
+
 def _vision_run():
     """Single background thread: capture, infer, drive the servos, and publish
     the latest annotated JPEG. Runs continuously regardless of how many (or how
@@ -601,6 +671,7 @@ def _vision_run():
     locked_id = None
     last_time = time.perf_counter()
     fps = 0.0
+    loop_latency_ms = 0.0
 
     model = None
     model_name = None
@@ -673,6 +744,24 @@ def _vision_run():
 
         h, w = frame.shape[:2]
         cx, cy = w // 2, h // 2
+        t_proc_start = now   # loop_latency_ms below times from here to servo-write
+
+        if slew_bench["active"]:
+            # Diagnostic mode: bypass tracking entirely for this frame. Any
+            # failure here aborts just the benchmark, not the vision thread.
+            try:
+                pan_angle, tilt_angle, _ = _slew_bench_step(
+                    frame, now, dt, servos, config, slew_bench, pan_angle, tilt_angle)
+            except Exception as exc:
+                slew_bench["active"] = False
+                slew_bench["error"] = str(exc)
+            cv2.putText(frame, "SLEW BENCHMARK", (12, 28),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            ok2, buffer = cv2.imencode(".jpg", frame)
+            if ok2:
+                with frame_lock:
+                    latest_jpeg = buffer.tobytes()
+            continue
 
         # Apply live-tuned PID gains and settings.
         pan_pid.kp, pan_pid.ki, pan_pid.kd = config["kp"], config["ki"], config["kd"]
@@ -937,6 +1026,13 @@ def _vision_run():
         # "sim" = no board attached; otherwise reflect the master switch.
         telemetry["servo"] = "sim" if not servos.ok else ("on" if config["servo_enabled"] else "off")
 
+        # Processing latency: capture-read to here (servo writes already
+        # issued above). Smoothed the same way fps is. See telemetry comment
+        # for what this does and doesn't include.
+        proc_ms = (time.perf_counter() - t_proc_start) * 1000.0
+        loop_latency_ms = 0.9 * loop_latency_ms + 0.1 * proc_ms
+        telemetry["loop_latency_ms"] = round(loop_latency_ms, 1)
+
         ok2, buffer = cv2.imencode(".jpg", annotated)
         if ok2:
             with frame_lock:
@@ -971,6 +1067,38 @@ def center():
     """Ask the vision loop to snap pan/tilt back to mechanical center."""
     control["recenter"] = True
     return jsonify({"ok": True})
+
+
+@app.route("/bench/slew", methods=["POST"])
+def start_slew_bench():
+    """Kick off the slew-rate benchmark (see slew_bench comment above
+    _vision_run). Point the camera at a normal textured, static scene first -
+    the measurement is done by watching the background move."""
+    if slew_bench.get("active"):
+        return jsonify({"ok": False, "error": "benchmark already running"}), 409
+    data = request.get_json(silent=True) or {}
+    axis = data.get("axis", "pan")
+    if axis not in ("pan", "tilt"):
+        return jsonify({"ok": False, "error": "axis must be 'pan' or 'tilt'"}), 400
+    slew_bench.clear()
+    slew_bench.update({
+        "active": True, "axis": axis, "prev_gray": None, "samples": [],
+        "duration": float(data.get("duration", 2.5)),
+        "result": None, "error": None,
+    })
+    return jsonify({"ok": True})
+
+
+@app.route("/bench/slew", methods=["GET"])
+def get_slew_bench():
+    """Poll for benchmark progress/result. `active` goes false once `result`
+    (or `error`) is populated."""
+    return jsonify({
+        "active": slew_bench.get("active", False),
+        "result": slew_bench.get("result"),
+        "error": slew_bench.get("error"),
+        "sample_count": len(slew_bench.get("samples", [])),
+    })
 
 
 @app.route("/config", methods=["GET"])
